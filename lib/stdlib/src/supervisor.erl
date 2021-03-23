@@ -69,7 +69,7 @@
 -type shutdown() :: 'brutal_kill' | timeout().
 -type worker()   :: 'worker' | 'supervisor'.
 -type sup_name() :: {'local', Name :: atom()}
-                  | {'global', Name :: atom()}
+                  | {'global', Name :: term()}
                   | {'via', Module :: module(), Name :: any()}.
 -type sup_ref()  :: (Name :: atom())
                   | {Name :: atom(), Node :: node()}
