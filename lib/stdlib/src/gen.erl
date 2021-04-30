@@ -46,7 +46,7 @@
                     | {'global', term()}
                     | {'via', Module :: module(), Name :: term()}.
 
--type start_ret()  :: {'ok', pid()} | 'ignore' | {'error', term()}.
+-type start_ret()  :: {'ok', pid()} | {'ok', {pid(), reference()}} | 'ignore' | {'error', term()}.
 
 -type debug_flag() :: 'trace' | 'log' | 'statistics' | 'debug'
                     | {'logfile', string()}.
@@ -72,7 +72,7 @@
 %%    Options = [{timeout, Timeout} | {debug, [Flag]} | {spawn_opt, OptionList}]
 %%      Flag = trace | log | {logfile, File} | statistics | debug
 %%          (debug == log && statistics)
-%% Returns: {ok, Pid} | ignore |{error, Reason} |
+%% Returns: {ok, Pid} | {ok, Pid, Reference} | ignore |{error, Reason} |
 %%          {error, {already_started, Pid}} |
 %%    The 'already_started' is returned only if Name is given 
 %%-----------------------------------------------------------------
@@ -335,9 +335,12 @@ check_response(Msg, Mref) when is_reference(Mref) ->
 %%
 %% Send a reply to the client.
 %%
+reply({_To, [alias|Alias] = Tag}, Reply) when is_reference(Alias) ->
+    Alias ! {Tag, Reply}, ok;
+reply({_To, [[alias|Alias] | _] = Tag}, Reply) when is_reference(Alias) ->
+    Alias ! {Tag, Reply}, ok;
 reply({To, Tag}, Reply) ->
-    Msg = {Tag, Reply},
-    try To ! Msg catch _:_ -> Msg end.
+    try To ! {Tag, Reply}, ok catch _:_ -> ok end.
 
 %%-----------------------------------------------------------------
 %% Syncronously stop a generic process

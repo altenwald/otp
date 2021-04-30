@@ -714,7 +714,7 @@
     </func>
 
     <func>
-      <name name="crypto_final" arity="1" since=""/>
+      <name name="crypto_final" arity="1" since="OTP 23.0"/>
       <fsummary>Ends a series of encryptions or decryptions</fsummary>
       <desc>
 	<p>
@@ -727,7 +727,7 @@
     </func>
 
     <func>
-      <name name="crypto_get_data" arity="1" since=""/>
+      <name name="crypto_get_data" arity="1" since="OTP 23.0"/>
       <fsummary>Get information about crypto states</fsummary>
       <desc>
 	<p>
@@ -1189,7 +1189,7 @@
       <name name="cipher_info" arity="1" since="OTP 22.0"/>
       <fsummary>Information about supported ciphers.</fsummary>
       <desc>
-	<p>Provides a map with information about block_size, key_length, iv_length and possibly other properties of the
+	<p>Provides a map with information about block_size, key_length, iv_length, aead support and possibly other properties of the
 	cipher algorithm in question.
 	</p>
         <note>

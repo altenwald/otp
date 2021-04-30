@@ -1,7 +1,7 @@
 %%
 %% %CopyrightBegin%
 %% 
-%% Copyright Ericsson AB 2018-2020. All Rights Reserved.
+%% Copyright Ericsson AB 2018-2021. All Rights Reserved.
 %% 
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -19696,7 +19696,10 @@ api_opt_ip_recvtos_udp4(doc) ->
 api_opt_ip_recvtos_udp4(_Config) when is_list(_Config) ->
     ?TT(?SECS(5)),
     tc_try(api_opt_ip_recvtos_udp4,
-           fun() -> has_support_ip_recvtos() end,
+           fun() ->
+                   has_support_ip_recvtos(),
+                   has_support_ip_tos() % Used in the test
+           end,
            fun() ->
                    Set  = fun(Sock, Value) ->
                                   socket:setopt(Sock, ip, recvtos, Value)
@@ -19706,15 +19709,15 @@ api_opt_ip_recvtos_udp4(_Config) when is_list(_Config) ->
                           end,
                    Send = fun(Sock, Data, Dest, default) ->
                                   Msg = #{addr => Dest,
-                                             iov  => [Data]},
+                                          iov  => [Data]},
                                   socket:sendmsg(Sock, Msg);
                              (Sock, Data, Dest, TOS) ->
                                   CMsg = #{level => ip,
-                                              type  => tos,
-                                              data  => TOS},
+                                           type  => tos,
+                                           data  => TOS},
                                   Msg  = #{addr => Dest,
-                                              ctrl => [CMsg],
-                                              iov  => [Data]},
+                                           ctrl => [CMsg],
+                                           iov  => [Data]},
                                   socket:sendmsg(Sock, Msg)
                           end,
                    Recv = fun(Sock) ->
@@ -19856,23 +19859,23 @@ api_opt_ip_recvtos_udp(InitState) ->
                            end
                    end},
 
-         #{desc => "set tos = mincost on src sock",
+         #{desc => "set tos = reliability on src sock",
            cmd  => fun(#{sock_src := Sock}) ->
-                           ok = socket:setopt(Sock, ip, tos, mincost)
+                           ok = socket:setopt(Sock, ip, tos, reliability)
                    end},
-         #{desc => "send req (to dst) (w tos = mincost)",
+         #{desc => "send req (to dst) (w tos = reliability)",
            cmd  => fun(#{sock_src := Sock,
                          sa_dst   := Dst,
                          send     := Send}) ->
                            Send(Sock, ?BASIC_REQ, Dst, default)
                    end},
 
-         %% #{desc => "send req (to dst) (w explicit tos = mincost)",
+         %% #{desc => "send req (to dst) (w explicit tos = reliability)",
          %%   cmd  => fun(#{sock_src := Sock,
          %%                 sa_dst   := Dst,
          %%                 send     := Send}) ->
          %%                   socket:setopt(Sock, otp, debug, true),
-         %%                   case Send(Sock, ?BASIC_REQ, Dst, mincost) of
+         %%                   case Send(Sock, ?BASIC_REQ, Dst, reliability) of
          %%                       ok ->
          %%                           socket:setopt(Sock, otp, debug, false),
          %%                           ok;
@@ -19975,21 +19978,21 @@ api_opt_ip_recvtos_udp(InitState) ->
                            end
                    end},
 
-         #{desc => "set tos = mincost on src sock",
+         #{desc => "set tos = reliability on src sock",
            cmd  => fun(#{sock_src := Sock}) ->
-                           ok = socket:setopt(Sock, ip, tos, mincost)
+                           ok = socket:setopt(Sock, ip, tos, reliability)
                    end},
 
          #{desc => "send req (to dst) (w tos = mincost)",
            cmd  => fun(#{sock_src := Sock, sa_dst := Dst, send := Send}) ->
                            Send(Sock, ?BASIC_REQ, Dst, default)
                    end},
-         #{desc => "recv req (from src) - w tos = mincost",
+         #{desc => "recv req (from src) - w tos = reliability",
            cmd  => fun(#{sock_dst := Sock, sa_src := Src, recv := Recv}) ->
                            case Recv(Sock) of
                                {ok, {Src, [#{level := ip,
                                              type  := TOS,
-                                             value := mincost = TOSData}],
+                                             value := reliability = TOSData}],
                                      ?BASIC_REQ}} 
                                  when ((TOS =:= tos) orelse (TOS =:= recvtos)) ->
                                    ?SEV_IPRINT("got expected TOS (~w) = ~w "
@@ -28076,11 +28079,16 @@ sc_rc_receive_response_tcp(InitState) ->
          %% *** Init part ***
          #{desc => "create node",
            cmd  => fun(#{host := Host, node_id := NodeID} = State) ->
-                           case start_node(Host, l2a(f("client_~w", [NodeID]))) of
+                           case start_node(Host,
+                                           l2a(f("client_~w", [NodeID]))) of
                                {ok, Node} ->
-                                   ?SEV_IPRINT("client node ~p started", [Node]),
+                                   ?SEV_IPRINT("client node ~p started",
+                                               [Node]),
                                    {ok, State#{node => Node}};
                                {error, Reason} ->
+                                   ?SEV_EPRINT("failed starting "
+                                               "client node ~p (=> SKIP):"
+                                               "~n   ~p", [NodeID, Reason]),
                                    {skip, Reason}
                            end
                    end},
@@ -28492,9 +28500,9 @@ sc_rc_receive_response_tcp(InitState) ->
     Tester = ?SEV_START("tester", TesterSeq, TesterInitState),
 
     i("await evaluator"),
-    ok = ?SEV_AWAIT_FINISH([Server,
-                            Client1, Client2, Client3,
-                            Tester]).
+    ?line ok = ?SEV_AWAIT_FINISH([Server,
+                                  Client1, Client2, Client3,
+                                  Tester]).
 
 
 sc_rc_tcp_client_start(Node) ->

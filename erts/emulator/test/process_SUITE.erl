@@ -47,7 +47,8 @@
          process_info_reductions/1,
 	 bump_reductions/1, low_prio/1, binary_owner/1, yield/1, yield2/1,
 	 otp_4725/1, bad_register/1, garbage_collect/1, otp_6237/1,
-	 process_info_messages/1, process_flag_badarg/1, process_flag_heap_size/1,
+	 process_info_messages/1, process_flag_badarg/1,
+         process_flag_fullsweep_after/1, process_flag_heap_size/1,
 	 spawn_opt_heap_size/1, spawn_opt_max_heap_size/1,
 	 processes_large_tab/1, processes_default_tab/1, processes_small_tab/1,
 	 processes_this_tab/1, processes_apply_trap/1,
@@ -106,7 +107,8 @@ all() ->
      process_info_reductions,
      bump_reductions, low_prio, yield, yield2, otp_4725,
      bad_register, garbage_collect, process_info_messages,
-     process_flag_badarg, process_flag_heap_size,
+     process_flag_badarg,
+     process_flag_fullsweep_after, process_flag_heap_size,
      spawn_opt_heap_size, spawn_opt_max_heap_size,
      spawn_huge_arglist,
      spawn_request_bif,
@@ -1595,6 +1597,7 @@ process_flag_badarg(Config) when is_list(Config) ->
     chk_badarg(fun () -> process_flag(gurka, banan) end),
     chk_badarg(fun () -> process_flag(trap_exit, gurka) end),
     chk_badarg(fun () -> process_flag(error_handler, 1) end),
+    chk_badarg(fun () -> process_flag(fullsweep_after, gurka) end),
     chk_badarg(fun () -> process_flag(min_heap_size, gurka) end),
     chk_badarg(fun () -> process_flag(min_bin_vheap_size, gurka) end),
     chk_badarg(fun () -> process_flag(min_bin_vheap_size, -1) end),
@@ -2211,6 +2214,15 @@ processes_gc_trap(Config) when is_list(Config) ->
 
     unlink(Suspendee),
     exit(Suspendee, bang),
+    ok.
+
+process_flag_fullsweep_after(Config) when is_list(Config) ->
+    {fullsweep_after, OldFSA} = process_info(self(), fullsweep_after),
+    OldFSA = process_flag(fullsweep_after, 12345),
+    {fullsweep_after, 12345} = process_info(self(), fullsweep_after),
+    12345 = process_flag(fullsweep_after, 0),
+    {fullsweep_after, 0} = process_info(self(), fullsweep_after),
+    0 = process_flag(fullsweep_after, OldFSA),
     ok.
 
 process_flag_heap_size(Config) when is_list(Config) ->
@@ -3568,6 +3580,8 @@ do_otp_7738_test(Type) ->
 
 gor(Reds, Stop) ->
     receive
+	drop_me ->
+	    gor(Reds+1, Stop);	    
 	{From, reds} ->
 	    From ! {reds, Reds, self()},
 	    gor(Reds+1, Stop);
@@ -3580,7 +3594,11 @@ gor(Reds, Stop) ->
 garb_other_running(Config) when is_list(Config) ->
     Stop = make_ref(),
     {Pid, Mon} = spawn_monitor(fun () -> gor(0, Stop) end),
-    Reds = lists:foldl(fun (_, OldReds) ->
+    Reds = lists:foldl(fun (N, OldReds) ->
+			             case N rem 2 of
+					 0 -> Pid ! drop_me;
+					 _ -> ok
+				     end,
 				     erlang:garbage_collect(Pid),
 				     receive after 1 -> ok end,
 				     Pid ! {self(), reds},
@@ -3655,18 +3673,18 @@ no_priority_inversion2(Config) when is_list(Config) ->
 			       tok_loop()
 		       end,
 		       [{priority, low}, monitor, link]),
-    RL = request_gc(PL, low),
-    RN = request_gc(PL, normal),
-    RH = request_gc(PL, high),
+    RL = request_test(PL, low),
+    RN = request_test(PL, normal),
+    RH = request_test(PL, high),
     receive
-	{garbage_collect, _, _} ->
-	    ct:fail(unexpected_gc)
+	{system_task_test, _, _} ->
+	    ct:fail(unexpected_system_task_completed)
     after 1000 ->
 	    ok
     end,
-    RM = request_gc(PL, max),
+    RM = request_test(PL, max),
     receive
-	{garbage_collect, RM, true} ->
+	{system_task_test, RM, true} ->
 	    ok
     end,
     lists:foreach(fun ({P, _}) ->
@@ -3680,15 +3698,15 @@ no_priority_inversion2(Config) when is_list(Config) ->
 			  end
 		  end, MTLs),
     receive
-	{garbage_collect, RH, true} ->
+	{system_task_test, RH, true} ->
 	    ok
     end,
     receive
-	{garbage_collect, RN, true} ->
+	{system_task_test, RN, true} ->
 	    ok
     end,
     receive
-	{garbage_collect, RL, true} ->
+	{system_task_test, RL, true} ->
 	    ok
     end,
     unlink(PL),
@@ -3700,18 +3718,18 @@ no_priority_inversion2(Config) when is_list(Config) ->
     process_flag(priority, Prio),
     ok.
 
-request_gc(Pid, Prio) ->
+request_test(Pid, Prio) ->
     Ref = make_ref(),
-    erts_internal:request_system_task(Pid, Prio, {garbage_collect, Ref, major}),
+    erts_internal:request_system_task(Pid, Prio, {system_task_test, Ref}),
     Ref.
 
 system_task_blast(Config) when is_list(Config) ->
     Me = self(),
     GCReq = fun () ->
-		    RL = gc_req(Me, 100),
+		    RL = test_req(Me, 100),
 		    lists:foreach(fun (R) ->
 					  receive
-					      {garbage_collect, R, true} ->
+					      {system_task_test, R, true} ->
 						  ok
 					  end
 				  end, RL),
@@ -3726,14 +3744,14 @@ system_task_blast(Config) when is_list(Config) ->
 		  end, HTLs),
     ok.
 
-gc_req(_Pid, 0) ->
+test_req(_Pid, 0) ->
     [];
-gc_req(Pid, N) ->
-    R0 = request_gc(Pid, low),
-    R1 = request_gc(Pid, normal),
-    R2 = request_gc(Pid, high),
-    R3 = request_gc(Pid, max),
-    [R0, R1, R2, R3 | gc_req(Pid, N-1)].
+test_req(Pid, N) ->
+    R0 = request_test(Pid, low),
+    R1 = request_test(Pid, normal),
+    R2 = request_test(Pid, high),
+    R3 = request_test(Pid, max),
+    [R0, R1, R2, R3 | test_req(Pid, N-1)].
 
 system_task_on_suspended(Config) when is_list(Config) ->
     {P, M} = spawn_monitor(fun () ->
@@ -3898,17 +3916,16 @@ otp_16642(Config) when is_list(Config) ->
                                   erts_internal:request_system_task(
                                     Pid,
                                     Prio,
-                                    {check_process_code,
-                                     {Prio, N},
-                                     '__non_existing_module__'})
+                                    {system_task_test,
+                                     {Prio, N}})
                           end,
                           lists:seq(Start, Stop))
                 end,
     MkResList = fun (Prio, Start, Stop) ->
                         lists:map(fun (N) ->
-                                          {check_process_code,
+                                          {system_task_test,
                                            {Prio, N},
-                                           false}
+                                           true}
                                   end,
                                   lists:seq(Start, Stop))
                 end,

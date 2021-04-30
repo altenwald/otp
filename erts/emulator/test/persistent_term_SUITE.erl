@@ -22,14 +22,18 @@
 -include_lib("common_test/include/ct.hrl").
 
 -export([all/0,suite/0,init_per_suite/1,end_per_suite/1,
+	 init_per_testcase/2, end_per_testcase/2,
 	 basic/1,purging/1,sharing/1,get_trapping/1,
          destruction/1,
+         get_all_race/1,
          info/1,info_trapping/1,killed_while_trapping/1,
          off_heap_values/1,keys/1,collisions/1,
          init_restart/1, put_erase_trapping/1,
          killed_while_trapping_put/1,
          killed_while_trapping_erase/1,
-         error_info/1]).
+         error_info/1,
+	 whole_message/1,
+	 non_message_signal/1]).
 
 %%
 -export([test_init_restart_cmd/1]).
@@ -45,10 +49,13 @@ suite() ->
 all() ->
     [basic,purging,sharing,get_trapping,info,info_trapping,
      destruction,
+     get_all_race,
      killed_while_trapping,off_heap_values,keys,collisions,
      init_restart, put_erase_trapping, killed_while_trapping_put,
      killed_while_trapping_erase,
-     error_info].
+     error_info,
+     whole_message,
+     non_message_signal].
 
 init_per_suite(Config) ->
     erts_debug:set_internal_state(available_internal_state, true),
@@ -61,6 +68,15 @@ end_per_suite(Config) ->
     persistent_term:erase(init_per_suite),
     erts_debug:set_internal_state(available_internal_state, false),
     Config.
+
+init_per_testcase(_, Config) ->
+    Config.
+
+end_per_testcase(_, _Config) ->
+    ok;
+end_per_testcase(get_all_race, _Config) ->
+    get_all_race_cleanup(),
+    ok.
 
 basic(_Config) ->
     Chk = chk(),
@@ -737,6 +753,48 @@ do_test_init_restart_cmd(File) ->
             init:stop()
     end.
 
+%% Test that the literal is copied when removed also when
+%% the whole message is a literal...
+
+whole_message(Config) when is_list(Config) ->
+    whole_message_test(on_heap),
+    whole_message_test(off_heap),
+    ok.
+    
+whole_message_test(MQD) ->
+    io:format("Testing on ~p~n", [MQD]),
+    Go = make_ref(),
+    Done = make_ref(),
+    TestRef = make_ref(),
+    Tester = self(),
+    persistent_term:put(test_ref, TestRef),
+    Pid = spawn_opt(fun () ->
+                             receive Go -> ok end,
+                             receive TestRef -> ok end,
+                             receive TestRef -> ok end,
+                             receive TestRef -> ok end,
+                             receive [TestRef] -> ok end,
+                             receive [TestRef] -> ok end,
+                             receive [TestRef] -> ok end,
+                             Tester ! Done
+                     end, [link, {message_queue_data, MQD}]),
+    Pid ! persistent_term:get(test_ref),
+    Pid ! persistent_term:get(test_ref),
+    Pid ! persistent_term:get(test_ref),
+    %% Throw in some messages with a reference from the heap
+    %% while we're at it...
+    Pid ! [persistent_term:get(test_ref)],
+    Pid ! [persistent_term:get(test_ref)],
+    Pid ! [persistent_term:get(test_ref)],
+    persistent_term:erase(test_ref),
+    receive after 1000 -> ok end,
+    Pid ! Go,
+    receive Done -> ok end,
+    unlink(Pid),
+    exit(Pid, kill),
+    false = is_process_alive(Pid),
+    ok.
+
 %% Check that there is the same number of persistents terms before
 %% and after each test case.
 
@@ -950,3 +1008,113 @@ eval_bif_error(F, Args, Opts, T, Errors0) ->
                     do_error_info(T, Errors)
             end
     end.
+
+
+%% OTP-17298
+get_all_race(_Config) ->
+    N = 20 * erlang:system_info(schedulers_online),
+    persistent_term:put(get_all_race, N),
+    SPs = [spawn_link(fun() -> gar_setter(Seq) end) || Seq <- lists:seq(1, N)],
+    GPs = [spawn_link(fun gar_getter/0) || _ <- lists:seq(1, N)],
+    receive after 2000 -> ok end,
+    [begin unlink(Pid), exit(Pid,kill) end || Pid <- (SPs ++ GPs)],
+    ok.
+
+get_all_race_cleanup() ->
+    N = persistent_term:get(get_all_race, 0),
+    _ = persistent_term:erase(get_all_race),
+    [_ = persistent_term:erase(Seq) || Seq <- lists:seq(1, N)],
+    ok.
+
+gar_getter() ->
+    erts_debug:set_internal_state(reds_left, 1),
+    _ = persistent_term:get(),
+    gar_getter().
+
+gar_setter(Key) ->
+    erts_debug:set_internal_state(reds_left, 1),
+    persistent_term:erase(Key),
+    persistent_term:put(Key, {complex, term}),
+    gar_setter(Key).
+
+%% Test that literals in non-message signals are copied
+%% when removed...
+%%
+%% Currently the only non-message signal that may carry
+%% literals are alias-message signals. Exit signals have
+%% been added to the test since they should be added
+%% next...
+
+non_message_signal(Config) when is_list(Config) ->
+    non_message_signal_test(on_heap),
+    non_message_signal_test(off_heap),
+    ok.
+
+non_message_signal_test(MQD) ->
+    io:format("Testing on ~p~n", [MQD]),
+    process_flag(scheduler, 1),
+    process_flag(priority, max),
+    MultiSched = erlang:system_info(schedulers) > 1,
+    {TokOpts, RecvOpts}
+        = case MultiSched of
+              true ->
+                  {[link, {scheduler, 2}, {priority, high}],
+                   [link, {scheduler, 2}, {priority, low},
+		    {message_queue_data, MQD}]};
+              false ->
+                  {[link], [link, {message_queue_data, MQD}]}
+          end,
+    RecvPrepared = make_ref(),
+    TokPrepared = make_ref(),
+    Go = make_ref(),
+    Done = make_ref(),
+    TestRef = make_ref(),
+    Tester = self(),
+    persistent_term:put(test_ref, TestRef),
+    Pid = spawn_opt(fun () ->
+			    process_flag(trap_exit, true),
+                            Tester ! {RecvPrepared, alias()},
+                            receive Go -> ok end,
+			    recv_msg(TestRef, 50),
+			    recv_msg([TestRef], 50),
+                            recv_msg({'EXIT', Tester, TestRef}, 50),
+                            recv_msg({'EXIT', Tester, [TestRef]}, 50),
+                            Tester ! Done
+                    end, RecvOpts),
+    Alias = receive {RecvPrepared, A} -> A end,
+    Tok = spawn_opt(fun () ->
+                            Tester ! TokPrepared,
+                            tok_loop()
+                    end, TokOpts),
+    receive TokPrepared -> ok end,
+    lists:foreach(fun (_) -> Alias ! persistent_term:get(test_ref) end,
+		  lists:seq(1, 50)),
+    lists:foreach(fun (_) -> Alias ! [persistent_term:get(test_ref)] end,
+		  lists:seq(1, 50)),
+    lists:foreach(fun (_) -> exit(Pid, persistent_term:get(test_ref)) end,
+		  lists:seq(1, 50)),
+    lists:foreach(fun (_) -> exit(Pid, [persistent_term:get(test_ref)]) end,
+		  lists:seq(1, 50)),
+    persistent_term:erase(test_ref),
+    receive after 1000 -> ok end,
+    unlink(Tok),
+    exit(Tok, kill),
+    receive after 1000 -> ok end,
+    Pid ! Go,
+    receive Done -> ok end,
+    unlink(Pid),
+    exit(Pid, kill),
+    false = is_process_alive(Pid),
+    false = is_process_alive(Tok),
+    ok.
+
+recv_msg(_Msg, 0) ->
+    ok;
+recv_msg(Msg, N) ->
+    receive
+        Msg ->
+            recv_msg(Msg, N-1)
+    end.
+
+tok_loop() ->
+    tok_loop().

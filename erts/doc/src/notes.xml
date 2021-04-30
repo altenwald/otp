@@ -31,6 +31,229 @@
   </header>
   <p>This document describes the changes made to the ERTS application.</p>
 
+<section><title>Erts 11.2.1</title>
+
+    <section><title>Fixed Bugs and Malfunctions</title>
+      <list>
+        <item>
+	    <p>The following signals could pass before other signals
+	    from the same sender to the same receiver. That is, these
+	    signals could arrive too early.</p> <list>
+	    <item><c>garbage-collect</c> request. Sent from one
+	    process to another using one of the
+	    <c>garbage_collect()</c> BIFs.</item>
+	    <item><c>check-process-code</c> request. Sent from one
+	    process to another using one of the
+	    <c>check_process_code()</c> BIFs.</item>
+	    <item><c>is-process-alive</c> reply. Sent as a response
+	    to a process calling the <c>is_process_alive()</c>
+	    BIF.</item> <item><c>process-info</c> reply. Sent as a
+	    response to a process calling one of the
+	    <c>process_info()</c> BIFs.</item>
+	    <item><c>port-command</c> reply. Sent as a response to a
+	    process calling one of the <c>port_command()</c>
+	    BIFs.</item> <item><c>port-connect</c> reply. Sent as a
+	    response to a process calling the <c>port_connect()</c>
+	    BIF.</item> <item><c>port-close</c> reply. Sent as a
+	    response to a process calling the <c>port_close()</c>
+	    BIF.</item> <item><c>port-control</c> reply. Sent as a
+	    response to a process calling the <c>port_control()</c>
+	    BIF.</item> <item><c>port-call</c> reply. Sent as a
+	    response to a process calling the <c>port_call()</c>
+	    BIF.</item> <item><c>port-info</c> reply. Sent as a
+	    response to a process calling one of the
+	    <c>port_info()</c> BIFs.</item> </list>
+          <p>
+	    Own Id: OTP-17291</p>
+        </item>
+        <item>
+          <p>
+	    Fix bug in <c>persistent_term:get/0</c> and <c>info/0</c>
+	    that could cause VM crash in rare cases. Bug exists since
+	    OTP 23.0.</p>
+          <p>
+	    Own Id: OTP-17298</p>
+        </item>
+        <item>
+	    <p>Fixed a bug in <c>zlib</c> where decompression would
+	    crash with <c>data_error</c> on some valid inputs.</p>
+          <p>
+	    Own Id: OTP-17299 Aux Id: GH-4710 </p>
+        </item>
+        <item>
+          <p>
+	    A garbage collection of a literal area missed messages
+	    that entirely consisted of a term in a literal area. This
+	    could in turn lead to a crash of the runtime system.</p>
+          <p>
+	    Own Id: OTP-17307</p>
+        </item>
+        <item>
+          <p>
+	    A call to <c>process_flag(message_queue_data,
+	    off_heap)</c> could cause a crash of the runtime system
+	    when sequential tracing was enabled.</p>
+          <p>
+	    Own Id: OTP-17349</p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
+<section><title>Erts 11.2</title>
+
+    <section><title>Fixed Bugs and Malfunctions</title>
+      <list>
+        <item>
+          <p>
+	    Fix memory leak of about 6 words when
+	    <c>erlang:process_flag/3</c> is called with a pid of an
+	    already dead process. Bug exists since OTP-21.0.</p>
+          <p>
+	    Own Id: OTP-17081 Aux Id: PR-2930 </p>
+        </item>
+        <item>
+          <p>
+	    Fixed small memory leak in <c>erl_drv_send_term</c> and
+	    <c>erl_drv_output_term</c> when failing due to the term
+	    being invalid.</p>
+          <p>
+	    Own Id: OTP-17089 Aux Id: PR-2934 </p>
+        </item>
+        <item>
+          <p>
+	    The DTrace/SystemTap <c>process_heap_grow</c> probe is
+	    now called with valid the heap and stack pointers for the
+	    process in question.</p>
+          <p>
+	    Own Id: OTP-17096 Aux Id: PR-2932 </p>
+        </item>
+        <item>
+	    <p>Fixed a performance issue in memory allocation for
+	    Linux kernels that didn't support <c>MADV_FREE</c>.</p>
+          <p>
+	    Own Id: OTP-17124</p>
+        </item>
+        <item>
+          <p>
+	    A <seeguide
+	    marker="erts:erl_dist_protocol#new_link_protocol">new
+	    link protocol</seeguide> has been introduced which
+	    prevents links from ending up in an inconsistent state
+	    where one participant considers itself linked while the
+	    other doesn't. This bug has always existed in the
+	    distributed case, but has since OTP 21 also existed in
+	    the node local case since the distributed link protocol
+	    then was adopted also for node local links. The bug
+	    could, however, only trigger if both participants
+	    operated on the link simultaneously.</p>
+          <p>
+	    Own Id: OTP-17127</p>
+        </item>
+        <item>
+          <p>
+	    Fix memory leak when receiving sigchld from port program
+	    to already dead port.</p>
+          <p>
+	    Own Id: OTP-17163</p>
+        </item>
+        <item>
+          <p>
+	    Fix bug where complex seq_trace tokens (that is lists,
+	    tuples, maps etc) could becomes corrupted by the GC. The
+	    bug was introduced in OTP-21.</p>
+          <p>
+	    Own Id: OTP-17209 Aux Id: PR-3039 </p>
+        </item>
+        <item>
+          <p>
+	    Fixed WSLPATH environment variable addition to PATH on
+	    windows, the last character was lost.</p>
+          <p>
+	    Own Id: OTP-17229</p>
+        </item>
+        <item>
+          <p>
+	    Fixed a bug in the timer implementation which could cause
+	    timers that were set to more than 37.25 hours in the
+	    future to be delayed. This could occur if there were
+	    multiple timers scheduled to be triggered very close in
+	    time, but still at different times, and the scheduler
+	    thread handling the timers was not able to handle them
+	    quickly enough. Delayed timers were in this case
+	    triggered when another unrelated timer was triggered.</p>
+          <p>
+	    Own Id: OTP-17253</p>
+        </item>
+        <item>
+          <p>
+	    Fixed small memory leak in <c>erlang:trace/3</c> if
+	    option <c>{tracer,_}</c> is included and the option list
+	    is invalid or the call races with a concurrent trace or
+	    code change operation.</p>
+          <p>
+	    Own Id: OTP-17265 Aux Id: PR-4596 </p>
+        </item>
+        <item>
+          <p>
+	    Fix configure check for <c>inet_pton</c> on 32-bit
+	    windows. The failure of this check would cause epmd to be
+	    built without ipv6 support.</p>
+          <p>
+	    Own Id: OTP-17283</p>
+        </item>
+      </list>
+    </section>
+
+
+    <section><title>Improvements and New Features</title>
+      <list>
+        <item>
+          <p>
+	    Various address sanitizer support.</p>
+          <p>
+	    Own Id: OTP-16959 Aux Id: PR-2965 </p>
+        </item>
+        <item>
+	    <p>The emulator will now honor <c>cgroup2</c> CPU
+	    quotas.</p>
+          <p>
+	    Own Id: OTP-17002</p>
+        </item>
+        <item>
+          <p>
+	    Improved memory barrier usage on ARMv8 hardware, and
+	    specifically on Apple silicon.</p>
+          <p>
+	    Own Id: OTP-17195 Aux Id: PR-4505, PR-4538 </p>
+        </item>
+        <item>
+          <p>
+	    Improved memory barrier usage on 64-bit POWER hardware.</p>
+          <p>
+	    Own Id: OTP-17200 Aux Id: PR-4510 </p>
+        </item>
+        <item>
+          <p>
+	    Fix a file descriptor leak when using sendfile and the
+	    remote side closes the connection. This bug has been
+	    present since OTP-21.0.</p>
+          <p>
+	    Own Id: OTP-17244</p>
+        </item>
+        <item>
+          <p>
+	    Refinement of the documentation of the
+	    <c>message_queue_data</c> process flag.</p>
+          <p>
+	    Own Id: OTP-17252 Aux Id: PR-4568 </p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
 <section><title>Erts 11.1.8</title>
 
     <section><title>Fixed Bugs and Malfunctions</title>
@@ -1210,6 +1433,50 @@
 	    set before Erlang can be started.</p>
           <p>
 	    Own Id: OTP-16635 Aux Id: ERL-476 PR-2390 </p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
+<section><title>Erts 10.7.2.9</title>
+
+    <section><title>Fixed Bugs and Malfunctions</title>
+      <list>
+        <item>
+          <p>
+	    Fixed a bug in the timer implementation which could cause
+	    timers that were set to more than 37.25 hours in the
+	    future to be delayed. This could occur if there were
+	    multiple timers scheduled to be triggered very close in
+	    time, but still at different times, and the scheduler
+	    thread handling the timers was not able to handle them
+	    quickly enough. Delayed timers were in this case
+	    triggered when another unrelated timer was triggered.</p>
+          <p>
+	    Own Id: OTP-17253</p>
+        </item>
+        <item>
+          <p>
+	    Fix bug in call_time tracing (used by eprof) that could
+	    cause VM crash. Bug exists since OTP-22.2 (but not in
+	    OTP-23).</p>
+          <p>
+	    Own Id: OTP-17290 Aux Id: GH-4635 </p>
+        </item>
+      </list>
+    </section>
+
+
+    <section><title>Improvements and New Features</title>
+      <list>
+        <item>
+          <p>
+	    Fix a file descriptor leak when using sendfile and the
+	    remote side closes the connection. This bug has been
+	    present since OTP-21.0.</p>
+          <p>
+	    Own Id: OTP-17244</p>
         </item>
       </list>
     </section>
@@ -3230,6 +3497,42 @@
 	    -remsh bar </c></p>
           <p>
 	    Own Id: OTP-15794 Aux Id: PR-2219 </p>
+        </item>
+      </list>
+    </section>
+
+</section>
+
+<section><title>Erts 10.3.5.17</title>
+
+    <section><title>Fixed Bugs and Malfunctions</title>
+      <list>
+        <item>
+          <p>
+	    Fixed a bug in the timer implementation which could cause
+	    timers that were set to more than 37.25 hours in the
+	    future to be delayed. This could occur if there were
+	    multiple timers scheduled to be triggered very close in
+	    time, but still at different times, and the scheduler
+	    thread handling the timers was not able to handle them
+	    quickly enough. Delayed timers were in this case
+	    triggered when another unrelated timer was triggered.</p>
+          <p>
+	    Own Id: OTP-17253</p>
+        </item>
+      </list>
+    </section>
+
+
+    <section><title>Improvements and New Features</title>
+      <list>
+        <item>
+          <p>
+	    Fix a file descriptor leak when using sendfile and the
+	    remote side closes the connection. This bug has been
+	    present since OTP-21.0.</p>
+          <p>
+	    Own Id: OTP-17244</p>
         </item>
       </list>
     </section>

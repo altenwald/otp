@@ -1,7 +1,7 @@
 /*
  * %CopyrightBegin%
  *
- * Copyright Ericsson AB 1996-2020. All Rights Reserved.
+ * Copyright Ericsson AB 1996-2021. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -185,7 +185,7 @@ static char *plusz_val_switches[] = {
 
 void usage(const char *switchname);
 static void usage_format(char *format, ...);
-void start_epmd(char *epmd);
+void start_epmd_daemon(char *epmd);
 void error(char* format, ...);
 
 /*
@@ -404,6 +404,13 @@ static void add_boot_config(void)
 # define ADD_BOOT_CONFIG
 #endif
 
+#define NEXT_ARG_CHECK_NAMED(Option) \
+    do {                                                                \
+        if (i+1 >= argc || strncmp(argv[i+1], "--", 3) == 0)            \
+            usage(Option);                                              \
+    } while(0)
+
+#define NEXT_ARG_CHECK() NEXT_ARG_CHECK_NAMED(argv[i])
 
 #ifdef __WIN32__
 __declspec(dllexport) int win_erlexec(int argc, char **argv, HANDLE module, int windowed)
@@ -415,6 +422,8 @@ int main(int argc, char **argv)
 				 * of the arguments. */
     int isdistributed = 0;
     int no_epmd = 0;
+    int proto_dist = 0;
+    int start_epmd = 1;         /* Whether epmd should be started */
     int i;
     char* s;
     char *epmd_prog = NULL;
@@ -513,15 +522,11 @@ int main(int argc, char **argv)
 	    } else if (strcmp(argv[i], "-extra") == 0) {
 		break;
 	    } else if (strcmp(argv[i], "-emu_type") == 0) {
-		if (i + 1 >= argc) {
-                    usage(argv[i]);
-                }
+                NEXT_ARG_CHECK();
                 emu_type = argv[i+1];
                 i++;
 	    } else if (strcmp(argv[i], "-emu_flavor") == 0) {
-		if (i + 1 >= argc) {
-                    usage(argv[i]);
-                }
+                NEXT_ARG_CHECK();
                 emu_flavor = argv[i+1];
                 i++;
 	    }
@@ -574,7 +579,7 @@ int main(int argc, char **argv)
             in_index = bindir_slug_index + bindir_slug_length;
             out_index += block_length;
         }
-
+        efree((void*)bindir_slug);
         strcpy(out_index, in_index);
     }
 
@@ -610,8 +615,7 @@ int main(int argc, char **argv)
 			    error("Conflicting -boot options");
                         if (got_start_erl)
                             error("Conflicting -start_erl and -boot options");
-			if (i+1 >= argc)
-			    usage("-boot");
+                        NEXT_ARG_CHECK();
 			boot_script = strsave(argv[i+1]);
 			i++;
 		    }
@@ -635,8 +639,7 @@ int main(int argc, char **argv)
 		    else if (strcmp(argv[i], "-config") == 0){
 			if (got_start_erl)
 			    error("Conflicting -start_erl and -config options");
-			if (i+1 >= argc)
-			    usage("-config");
+                        NEXT_ARG_CHECK();
                         do {
                             config_script_cnt++;
                             config_scripts = erealloc(config_scripts,
@@ -647,8 +650,7 @@ int main(int argc, char **argv)
 		    }
 #endif
                     else if (strcmp(argv[i], "-configfd") == 0) {
-                        if (i+1 >= argc)
- 			    usage("-configfd");
+                        NEXT_ARG_CHECK();
                         if ( strcmp(argv[i+1], "0") != 0 ) {
 			    add_arg(argv[i]);
                         } else {
@@ -685,13 +687,13 @@ int main(int argc, char **argv)
 		    } else if (strcmp(argv[i], "-emu_qouted_cmd_exit") == 0) {
 			print_qouted_cmd_exit = 1;
 		    } else if (strcmp(argv[i], "-env") == 0) { /* -env VARNAME VARVALUE */
-			if (i+2 >= argc)
-			    usage("-env");
-			set_env(argv[i+1], argv[i+2]);
-			i += 2;
+                        NEXT_ARG_CHECK();
+                        i += 1;
+                        NEXT_ARG_CHECK_NAMED("-env");
+			set_env(argv[i], argv[i+1]);
+			i += 1;
 		    } else if (strcmp(argv[i], "-epmd") == 0) {
-			if (i+1 >= argc)
-			    usage("-epmd");
+                        NEXT_ARG_CHECK();
 			epmd_prog = argv[i+1];
 			++i;
 		    } else {
@@ -731,8 +733,7 @@ int main(int argc, char **argv)
 
 		  case 'n':
 		    if (strcmp(argv[i], "-name") == 0) { /* -name NAME */
-			if (i+1 >= argc)
-			    usage("-name");
+                        NEXT_ARG_CHECK();
 
 			/*
 			 * Note: Cannot use add_args() here, due to non-defined
@@ -751,6 +752,19 @@ int main(int argc, char **argv)
 		    } else if (strcmp(argv[i], "-no_epmd") == 0) {
 			add_arg("-no_epmd");
 			no_epmd = 1;
+			start_epmd = 0;
+		    } else {
+			add_arg(argv[i]);
+		    }
+		    break;
+
+		  case 'p':
+		    if (strcmp(argv[i], "-proto_dist") == 0) {
+			NEXT_ARG_CHECK();
+			add_arg(argv[i]);
+			add_arg(argv[i+1]);
+			proto_dist = 1;
+			i++;
 		    } else {
 			add_arg(argv[i]);
 		    }
@@ -758,8 +772,7 @@ int main(int argc, char **argv)
 
 		  case 's':	/* -sname NAME */
 		    if (strcmp(argv[i], "-sname") == 0) {
-			if (i+1 >= argc)
-			    usage("-sname");
+                        NEXT_ARG_CHECK();
 			add_arg(argv[i]);
 			add_arg(argv[i+1]);
 			isdistributed = 1;
@@ -767,6 +780,7 @@ int main(int argc, char **argv)
 		    }
 #ifdef __WIN32__
 		    else if (strcmp(argv[i], "-service_event") == 0) {
+                        NEXT_ARG_CHECK();
 			add_arg(argv[i]);
 			add_arg(argv[i+1]);
 			i++;
@@ -780,15 +794,14 @@ int main(int argc, char **argv)
 		    }
 #endif
 		    else if (strcmp(argv[i], "-start_epmd") == 0) {
-			if (i+1 >= argc)
-			    usage("-start_epmd");
+                        NEXT_ARG_CHECK();
 
 			if (strcmp(argv[i+1], "true") == 0) {
 			    /* The default */
-			    no_epmd = 0;
+			    start_epmd = 1;
 			}
 			else if (strcmp(argv[i+1], "false") == 0) {
-			    no_epmd = 1;
+			    start_epmd = 0;
 			}
 			else
 			    usage_format("Expected boolean argument for \'-start_epmd\'.\n");
@@ -833,8 +846,7 @@ int main(int argc, char **argv)
 		  case 'K':
 		      if (argv[i][2] != '\0')
 			  goto the_default;
-		      if (i+1 >= argc)
-			  usage(argv[i]);
+                      NEXT_ARG_CHECK();
 		      argv[i][0] = '-';
 		      add_Eargs(argv[i]);
 		      add_Eargs(argv[i+1]);
@@ -844,6 +856,7 @@ int main(int argc, char **argv)
                       if (argv[i][2] == 'O' && (argv[i][3] == 't' || argv[i][3] == 'p')) {
                           if (argv[i][4] != '\0')
                               goto the_default;
+                          NEXT_ARG_CHECK();
                           argv[i][0] = '-';
                           add_Eargs(argv[i]);
                           add_Eargs(argv[i+1]);
@@ -854,6 +867,7 @@ int main(int argc, char **argv)
                           (argv[i][4] == 't' || argv[i][4] == 'p')) {
                           if (argv[i][5] != '\0')
                               goto the_default;
+                          NEXT_ARG_CHECK();
                           argv[i][0] = '-';
                           add_Eargs(argv[i]);
                           add_Eargs(argv[i+1]);
@@ -863,9 +877,7 @@ int main(int argc, char **argv)
                       usage(argv[i]);
                       break;
                   case 'J':
-                      if (i + 1 >= argc) {
-                          usage(argv[i]);
-                      }
+                      NEXT_ARG_CHECK();
                       argv[i][0] = '-';
                       add_Eargs(argv[i]);
                       add_Eargs(argv[i+1]);
@@ -889,8 +901,7 @@ int main(int argc, char **argv)
 		      }
 		      else if (argv[i][2] != '\0')
 			  goto the_default;
-		      if (i+1 >= argc)
-			  usage(argv[i]);
+                      NEXT_ARG_CHECK();
 		      argv[i][0] = '-';
 		      add_Eargs(argv[i]);
 		      add_Eargs(argv[i+1]);
@@ -909,17 +920,17 @@ int main(int argc, char **argv)
 			}
 		      }
 		      if (i+1 < argc) {
-			if ((argv[i+1][0] != '-') &&
-			    (argv[i+1][0] != '+')) {
-			  if (argv[i+1][0] == 'i') {
-			    add_Eargs(argv[i]);
-			    add_Eargs(argv[i+1]);
-			    i++;
-			    break;
-			  } else {
-			    usage(argv[i]);
+                          if (argv[i+1][1] == '\0') {
+                              if ((argv[i+1][0] == 'i') ||
+                                  (argv[i+1][0] == 'c') ||
+                                  (argv[i+1][0] == 'd')
+                                  ) {
+                                  add_Eargs(argv[i]);
+                                  add_Eargs(argv[i+1]);
+                                  i++;
+                                  break;
+                              }
 			  }
-			}
 		      }
 		      add_Eargs(argv[i]);
 		      break;
@@ -946,10 +957,7 @@ int main(int argc, char **argv)
 						plusM_au_alloc_switches))
 			  || is_one_of_strings(&argv[i][2],
 					       plusM_other_switches)) {
-			  if (i+1 >= argc
-			      || argv[i+1][0] == '-'
-			      || argv[i+1][0] == '+')
-			      usage(argv[i]);
+                          NEXT_ARG_CHECK();
 			  argv[i][0] = '-';
 			  add_Eargs(argv[i]);
 			  add_Eargs(argv[i+1]);
@@ -963,10 +971,7 @@ int main(int argc, char **argv)
 		      if (!is_one_of_strings(&argv[i][2], plush_val_switches)) {
 			  goto the_default;
 		      } else {
-			  if (i+1 >= argc
-			      || argv[i+1][0] == '-'
-			      || argv[i+1][0] == '+')
-			      usage(argv[i]);
+                          NEXT_ARG_CHECK();
 			  argv[i][0] = '-';
 			  add_Eargs(argv[i]);
 			  add_Eargs(argv[i+1]);
@@ -978,10 +983,7 @@ int main(int argc, char **argv)
 					     plusr_val_switches))
 			  goto the_default;
 		      else {
-			  if (i+1 >= argc
-			      || argv[i+1][0] == '-'
-			      || argv[i+1][0] == '+')
-			      usage(argv[i]);
+                          NEXT_ARG_CHECK();
 			  argv[i][0] = '-';
 			  add_Eargs(argv[i]);
 			  add_Eargs(argv[i+1]);
@@ -993,10 +995,7 @@ int main(int argc, char **argv)
 					     pluss_val_switches))
 			  goto the_default;
 		      else {
-			  if (i+1 >= argc
-			      || argv[i+1][0] == '-'
-			      || argv[i+1][0] == '+')
-			      usage(argv[i]);
+                          NEXT_ARG_CHECK();
 			  argv[i][0] = '-';
 			  add_Eargs(argv[i]);
 			  add_Eargs(argv[i+1]);
@@ -1006,8 +1005,7 @@ int main(int argc, char **argv)
 		  case 'p':
 		      if (argv[i][2] != 'c' || argv[i][3] != '\0')
 			  goto the_default;
-		      if (i+1 >= argc)
-			  usage(argv[i]);
+                      NEXT_ARG_CHECK();
 		      argv[i][0] = '-';
 		      add_Eargs(argv[i]);
 		      add_Eargs(argv[i+1]);
@@ -1017,10 +1015,7 @@ int main(int argc, char **argv)
 		      if (!is_one_of_strings(&argv[i][2], plusz_val_switches)) {
 			  goto the_default;
 		      } else {
-			  if (i+1 >= argc
-			      || argv[i+1][0] == '-'
-			      || argv[i+1][0] == '+')
-			      usage(argv[i]);
+                          NEXT_ARG_CHECK();
 			  argv[i][0] = '-';
 			  add_Eargs(argv[i]);
 			  add_Eargs(argv[i+1]);
@@ -1041,10 +1036,19 @@ int main(int argc, char **argv)
 	}
     }
 
+    efree(emu_name);
+
     if (process_args) {
 	ADD_BOOT_CONFIG;
     }
 #undef ADD_BOOT_CONFIG
+
+    /* The default distribution protocol (inet_tcp) relies on epmd,
+       so the -no_epmd option can only work when using an alternative
+       protocol for Erlang distribution. */
+    if (no_epmd && !proto_dist) {
+        error("Missing -proto_dist option, expected when using -no_epmd.");
+    }
 
     /* Doesn't conflict with -extra, since -make skips all the rest of
        the arguments. */
@@ -1052,8 +1056,8 @@ int main(int argc, char **argv)
 	add_args("-s", "erlang", "halt", NULL);
     }
 
-    if (isdistributed && !no_epmd)
-	start_epmd(epmd_prog);
+    if (isdistributed && start_epmd)
+	start_epmd_daemon(epmd_prog);
 
 #if (! defined(__WIN32__)) && defined(DEBUG)
     if (start_detached && get_env("ERL_CONSOLE_MODE")) {
@@ -1198,7 +1202,9 @@ int main(int argc, char **argv)
                         if (flavor == NULL) {
                             flavor = type;
                         } else {
-                            currbuff += sprintf(currbuff,"-emu_type %s ", strndup(type,flavor - type));
+                            char* emu_type = strndup(type,flavor - type);
+                            currbuff += sprintf(currbuff,"-emu_type %s ", emu_type);
+                            free(emu_type);
                             flavor++;
                         }
                         currbuff += sprintf(currbuff,"-emu_flavor %s", flavor);
@@ -1267,7 +1273,7 @@ usage_format(char *format, ...)
 }
 
 void
-start_epmd(char *epmd)
+start_epmd_daemon(char *epmd)
 {
     char  epmd_cmd[MAXPATHLEN+100];
 #ifdef __WIN32__

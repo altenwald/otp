@@ -1354,19 +1354,27 @@ check_unused_records(Forms, St0) ->
     AttrFiles = [File || {attribute,_A,file,{File,_Line}} <- Forms],
     case {is_warn_enabled(unused_record, St0),AttrFiles} of
         {true,[FirstFile|_]} ->
+            %% There are no line numbers in St0#lint.compile.
+            RecAnno = [{Rec, Anno} ||
+                          {attribute, Anno, compile, Args} <- Forms,
+                          {nowarn_unused_record, Recs0} <- lists:flatten([Args]),
+                          Rec <- lists:flatten([Recs0])],
+            St1 = foldl(fun ({Rec, Anno}, St2) ->
+                                exist_record(Anno, Rec, St2)
+                        end, St0, RecAnno),
             %% The check is a bit imprecise in that uses from unused
             %% functions count.
-            Usage = St0#lint.usage,
+            Usage = St1#lint.usage,
             UsedRecords = Usage#usage.used_records,
             URecs = gb_sets:fold(fun (Used, Recs) ->
                                          maps:remove(Used, Recs)
-                                 end, St0#lint.records, UsedRecords),
+                                 end, St1#lint.records, UsedRecords),
             Unused = [{Name,Anno} ||
                          {Name,{Anno,_Fields}} <- maps:to_list(URecs),
-                         element(1, loc(Anno, St0)) =:= FirstFile],
+                         element(1, loc(Anno, St1)) =:= FirstFile],
             foldl(fun ({N,Anno}, St) ->
                           add_warning(Anno, {unused_record, N}, St)
-                  end, St0, Unused);
+                  end, St1, Unused);
         _ ->
             St0
     end.
@@ -3092,6 +3100,9 @@ used_type(TypePair, Anno, #lint{usage = Usage, file = File} = St) ->
 is_default_type({Name, NumberOfTypeVariables}) ->
     erl_internal:is_type(Name, NumberOfTypeVariables).
 
+%% OTP 24.0
+is_newly_introduced_builtin_type({nonempty_binary, 0}) -> true;
+is_newly_introduced_builtin_type({nonempty_bitstring, 0}) -> true;
 is_newly_introduced_builtin_type({Name, _}) when is_atom(Name) -> false.
 
 is_obsolete_builtin_type(TypePair) ->

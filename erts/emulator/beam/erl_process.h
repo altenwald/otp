@@ -661,7 +661,7 @@ typedef struct ErtsSchedulerRegisters_ {
     ErtsCodePtr start_time_i;
     UWord start_time;
 
-#if !defined(NATIVE_ERLANG_STACK) && defined(HARD_DEBUG)
+#if !defined(NATIVE_ERLANG_STACK) && defined(JIT_HARD_DEBUG)
     /* Holds the initial thread stack pointer. Used to ensure that everything
      * that is pushed to the stack is also popped. */
     UWord *initial_sp;
@@ -1906,6 +1906,7 @@ void erts_schedule_thr_prgr_later_cleanup_op(void (*)(void *),
 					     ErtsThrPrgrLaterOp *,
 					     UWord);
 void erts_schedule_complete_off_heap_message_queue_change(Eterm pid);
+void erts_schedule_cla_gc(Process *c_p, Eterm to, Eterm req_id);
 struct db_fixation;
 void erts_schedule_ets_free_fixation(Eterm pid, struct db_fixation*);
 void erts_schedule_flush_trace_messages(Process *proc, int force_on_proc);
@@ -2413,7 +2414,13 @@ ErtsSchedulerData *erts_proc_sched_data(Process *c_p)
     else {
 	esdp = erts_get_scheduler_data();
 	ASSERT(esdp);
-	ASSERT(ERTS_SCHEDULER_IS_DIRTY(esdp));
+	/*
+	 * Not always true that we are on a dirty
+	 * scheduler; we may be executing on
+	 * behalf of another process...
+	 *
+	 * ASSERT(ERTS_SCHEDULER_IS_DIRTY(esdp));
+	 */
     }
     ASSERT(esdp);
     return esdp;
